@@ -1,7 +1,12 @@
-from svmutil import *
+from numba.cuda.simulator import kernel
+from svmutil import svm_problem, svm_parameter, svm_read_problem, svm_train, svm_predict
 import numpy as np
 import progressbar
+from sklearn.ensemble import AdaBoostClassifier as ABClassifier
+from sklearn.svm import SVC
+import matplotlib.pyplot as plt
 
+def normalize(x): return (x - x.min()) / (np.ptp(x))
 
 class AdaBoostClassifier:
 
@@ -13,52 +18,71 @@ class AdaBoostClassifier:
         self.alphas = []
 
     # Training function for the AdaBoost model.
-    def train(self, X, y):
+    def train(self, X, y, tolerance=0.000001):
+
+        Y = np.array(y)
 
         bar = progressbar.ProgressBar()
+        weights = np.ones(len(X))/(len(X))
 
         # For each bar in a range of the iteration value T for the classifier
         for _ in bar(range(self.T)):
-            # Reduce the weights by their norms
-            weights /= np.linalg.norm(weights)
-
-            # Create weak classifiers from the current images / features
-            
-
-            # Find the best classifier
-            results = np.array(results)
-
-            # If we converge
-            if min_error == 0 or min_error > 0.5:
-                bar.finish()
+            # print(weights)
+            # print(self.alphas)
+            prob  = svm_problem(weights, y, X)
+            param = svm_parameter('-s 2 -t 1 -d 5 -q')
+            m_poly = svm_train(prob, param)
+            self.clf.append(m_poly)
+            p_label, p_acc, p_val = svm_predict(y, X, m_poly)
+            labels = np.array(p_label).astype(np.float64)
+            eps = weights[Y != labels].sum()
+            #print(eps)
+            if eps < tolerance:
                 break
-
-            # Calculate our modification factor beta
-            beta = min_error/(1-min_error)
-            beta_pow = np.power(beta, 1 - results)
-
-            # Modify the weights for next iteration
-            weights = weights * beta_pow
-
-            # Create our alpha
-            alpha = np.log(1.0/beta)
-
-            # Remember the alpha in the classifier
-            self.alphas.append(alpha)
-            # Remember the best weak classifier in this itteration
-            self.clf.append(best_clf)
+            alpha_t = 0.5 * np.log((1.0 - eps)/eps)
+            self.alphas.append(alpha_t)
+            weights = weights * np.exp(-Y * labels * alpha_t)
+            weights /= np.sum(weights)
 
         # Convert alpha and clf info into np arrays.
-        self.alphas = np.asarray(self.alphas)
-        self.clf = np.asarray(self.clf)
+        # self.alphas = np.asarray(self.alphas)
+        # self.clf = np.asarray(self.clf)
     
     # Classify images with the adaboost classifier
     def classify(self, X):
-        
+        preds = np.zeros((1, len(X)))
+    
         # The adaboost classification score is the sum of best weak classifier scores multiplied by the corresponding alpha
-        classify_score = np.sum([alpha * clf.classify(integral_image) for alpha, clf in zip(self.alphas, self.clf)])
+        for alpha, clf in zip(self.alphas, self.clf):
+            weak_pred, _, _ = svm_predict([], X, clf, '-q')
+            #print(weak_pred)
+            preds += alpha * np.array(weak_pred)
         
-        # Define a random threshold for classification based on the sum of alphas
-        random_thresh = 0.5 * np.sum(self.alphas)
+        return np.sign(preds)
 
-        return 1 if classify_score >= random_thresh else 0
+def load_data():
+    y_test, x_test = svm_read_problem('./DogsVsCats/DogsVsCats.test')
+    y_train, x_train = svm_read_problem('./DogsVsCats/DogsVsCats.train')
+    return y_test, x_test, y_train, x_train
+
+if __name__ == "__main__":
+    y_test, x_test, y_train, x_train = load_data()
+    y_sample, x_sample = svm_read_problem('./DogsVsCats/DogsVsCats.train', return_scipy=False)
+    y_sample_test, x_sample_test = svm_read_problem('./DogsVsCats/DogsVsCats.test', return_scipy=False)
+    # print(len(y_train))
+    # print(len(x_train))
+    vals = []
+    for i in range(1, 11):
+        model = AdaBoostClassifier(i)
+        model.train(x_sample, y_sample)
+        preds = model.classify(x_test)
+        vals.append(np.sum(preds == np.array(y_test))/len(y_test))
+    plt.plot(np.arange(1, 11), vals)
+    plt.show()
+    # y_sample, x_sample = svm_read_problem('./DogsVsCats/DogsVsCats.train', return_scipy=True)
+    # y_sample_test, x_sample_test = svm_read_problem('./DogsVsCats/DogsVsCats.test', return_scipy=True)
+    # model = ABClassifier(base_estimator=SVC(kernel='poly', degree=5), algorithm='SAMME', n_estimators=10)
+    # model.fit(x_sample.todense(), y_sample)
+    # print(model.score(x_sample_test.todense(), y_sample_test))
+
+    

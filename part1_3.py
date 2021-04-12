@@ -11,10 +11,14 @@ if __name__ == '__main__':
     y_test, x_test, y_train, x_train = load_data()
 
     # Training
-    prob  = svm_problem(y_train, x_train)
-    param = svm_parameter('-t 0 -v 10')
+    W = W = [1] * len(y_train)
+    prob  = svm_problem(W, y_train, x_train)
+    param = svm_parameter('-t 0')
     m_lin = svm_train(prob, param)
 
-    prob  = svm_problem(y_train, x_train)
-    param = svm_parameter('-t 1 -d 5 -v 10')
+    prob  = svm_problem(W, y_train, x_train)
+    param = svm_parameter('-t 1 -d 5')
     m_poly = svm_train(prob, param)
+
+    p_label, p_acc, p_val = svm_predict(y_test, x_test, m_poly)
+    print(p_label)
